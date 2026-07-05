@@ -42,6 +42,17 @@ export default function Dashboard() {
     }
   };
 
+  useEffect(() => {
+    let interval: any;
+    const hasActiveJobs = jobs.some((j: any) => j.status === 'pending' || j.status === 'processing');
+    if (hasActiveJobs && token) {
+      interval = setInterval(() => {
+        fetchJobs();
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [jobs, token]);
+
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !token) return;

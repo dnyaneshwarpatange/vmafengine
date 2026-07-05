@@ -25,6 +25,12 @@ def get_video_duration(video_path):
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     return float(json.loads(result.stdout)["format"]["duration"])
 
+def get_video_bitrate(video_path):
+    cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", video_path]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    bitrate = json.loads(result.stdout).get("format", {}).get("bitrate")
+    return int(bitrate) if bitrate else 0
+
 def get_video_resolution(video_path):
     cmd = [
         "ffprobe", "-v", "quiet", "-print_format", "json",
@@ -65,7 +71,7 @@ def calculate_vmaf(original_path, distorted_path, vmaf_log_path):
         vmaf_data = json.load(f)
     return vmaf_data["pooled_metrics"]["vmaf"]["mean"]
 
-def build_ffmpeg_cmd(input_path, output_path, crf, codec, resolution, audio_bitrate, is_profiling=False):
+def build_ffmpeg_cmd(input_path, output_path, crf, codec, resolution, audio_bitrate, is_profiling=False, orig_bitrate=0):
     cmd = ["ffmpeg", "-y", "-i", input_path]
     
     # Resolution scaling
@@ -99,6 +105,10 @@ def build_ffmpeg_cmd(input_path, output_path, crf, codec, resolution, audio_bitr
             "-tile-columns", "4", "-tile-rows", "2"
         ])
         
+    if orig_bitrate > 0:
+        maxrate = int(orig_bitrate * 0.9) # cap at 90% of original
+        cmd.extend(["-maxrate", str(maxrate), "-bufsize", str(maxrate * 2)])
+        
     # Audio
     if is_profiling or audio_bitrate.lower() == "muted":
         cmd.append("-an")
@@ -110,7 +120,7 @@ def build_ffmpeg_cmd(input_path, output_path, crf, codec, resolution, audio_bitr
     return cmd
 
 
-def find_optimal_crf(video_path, work_dir, target_vmaf, codec, resolution):
+def find_optimal_crf(video_path, work_dir, target_vmaf, codec, resolution, orig_bitrate):
     """
     Minimizes compute: Tests only ONE 2-second segment using the Secant Method.
     """
@@ -137,7 +147,7 @@ def find_optimal_crf(video_path, work_dir, target_vmaf, codec, resolution):
         encoded_seg = os.path.join(work_dir, f"encoded_{crf_int}.mp4")
         vmaf_log = os.path.join(work_dir, f"vmaf_{crf_int}.json")
         
-        cmd = build_ffmpeg_cmd(seg_path, encoded_seg, crf_int, codec, resolution, "muted", is_profiling=True)
+        cmd = build_ffmpeg_cmd(seg_path, encoded_seg, crf_int, codec, resolution, "muted", is_profiling=True, orig_bitrate=orig_bitrate)
         result = subprocess.run(cmd, capture_output=True, timeout=FFMPEG_TIMEOUT)
         if result.returncode != 0:
             raise RuntimeError(f"segment encode failed: {result.stderr.decode(errors='ignore')[-500:]}")
@@ -178,8 +188,8 @@ def find_optimal_crf(video_path, work_dir, target_vmaf, codec, resolution):
 
 
 def encode_chunk(args):
-    input_chunk, output_chunk, crf, codec, resolution, audio_bitrate = args
-    cmd = build_ffmpeg_cmd(input_chunk, output_chunk, crf, codec, resolution, audio_bitrate, is_profiling=False)
+    input_chunk, output_chunk, crf, codec, resolution, audio_bitrate, orig_bitrate = args
+    cmd = build_ffmpeg_cmd(input_chunk, output_chunk, crf, codec, resolution, audio_bitrate, is_profiling=False, orig_bitrate=orig_bitrate)
     result = subprocess.run(cmd, capture_output=True, timeout=FFMPEG_TIMEOUT)
     if result.returncode != 0:
         raise RuntimeError(f"chunk encode failed: {result.stderr.decode(errors='ignore')[-500:]}")
@@ -189,7 +199,8 @@ def encode_chunk(args):
 def optimize_video(input_path, output_path, target_vmaf=94.0, codec="vp9", resolution="original", audio_bitrate="96k"):
     work_dir = tempfile.mkdtemp(prefix="vmaf_")
     try:
-        optimal_crf, sampled_vmaf = find_optimal_crf(input_path, work_dir, target_vmaf, codec, resolution)
+        orig_bitrate = get_video_bitrate(input_path)
+        optimal_crf, sampled_vmaf = find_optimal_crf(input_path, work_dir, target_vmaf, codec, resolution, orig_bitrate)
         
         logger.info("Splitting video into 60-second chunks...")
         chunk_pattern = os.path.join(work_dir, "chunk_%04d.mp4")
@@ -206,7 +217,7 @@ def optimize_video(input_path, output_path, target_vmaf=94.0, codec="vp9", resol
         
         for i, ic in enumerate(input_chunks):
             oc = os.path.join(work_dir, f"out_{i:04d}.{ext}")
-            encode_tasks.append((ic, oc, optimal_crf, codec, resolution, audio_bitrate))
+            encode_tasks.append((ic, oc, optimal_crf, codec, resolution, audio_bitrate, orig_bitrate))
             
         max_workers = min(len(input_chunks), os.cpu_count() or 4)
         logger.info(f"Encoding {len(input_chunks)} chunks using {max_workers} parallel workers (Secant CRF: {optimal_crf})...")
