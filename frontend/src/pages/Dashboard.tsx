@@ -85,9 +85,9 @@ export default function Dashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail);
       
-      const options = {
-        key: 'rzp_test_placeholder', // This is safe, real key will be injected
-        subscription_id: data.subscription_id,
+        const options = {
+        key: 'rzp_test_T2EVAaCCeuP2F0',
+        order_id: data.order_id,
         name: 'VMAF Optimizer',
         description: 'Enterprise Video Compression',
         handler: function () {

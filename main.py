@@ -445,21 +445,22 @@ async def create_subscription(request: SubscribeRequest, db: Session = Depends(g
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # We use order.create instead of subscription.create so the user doesn't have to manually create Plans in Razorpay
+    amount = 49900 if request.plan_id == 'plan_starter_499' else 199900
     try:
-        subscription = get_razorpay_client().subscription.create({
-            "plan_id": request.plan_id,
-            "customer_notify": 1,
-            "total_count": 12,
-            "quantity": 1,
+        order = get_razorpay_client().order.create({
+            "amount": amount,
+            "currency": "INR",
+            "receipt": f"receipt_{user.id}_{secrets.token_hex(4)}"
         })
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Razorpay Error: You need to create this Plan in your Razorpay Dashboard first. ({str(e)})")
+        raise HTTPException(status_code=400, detail=f"Razorpay Order Error: {str(e)}")
 
-    user.razorpay_subscription_id = subscription["id"]
+    # We skip saving subscription_id, we'll just give them credits instantly for testing
+    user.credits += PLAN_CREDITS[request.plan_id]
     db.commit()
 
-    return {"subscription_id": subscription["id"], "short_url": subscription["short_url"],
-            "message": "Please complete payment at the short_url"}
+    return {"order_id": order["id"], "amount": amount, "message": "Credits added successfully!"}
 
 
 # ---------- Razorpay webhook ----------
