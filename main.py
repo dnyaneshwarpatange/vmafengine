@@ -445,12 +445,15 @@ async def create_subscription(request: SubscribeRequest, db: Session = Depends(g
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    subscription = get_razorpay_client().subscription.create({
-        "plan_id": request.plan_id,
-        "customer_notify": True,   # NOTE: boolean field is `customer_notify`, not `customer_notify_id`
-        "total_count": 12,
-        "quantity": 1,
-    })
+    try:
+        subscription = get_razorpay_client().subscription.create({
+            "plan_id": request.plan_id,
+            "customer_notify": 1,
+            "total_count": 12,
+            "quantity": 1,
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Razorpay Error: You need to create this Plan in your Razorpay Dashboard first. ({str(e)})")
 
     user.razorpay_subscription_id = subscription["id"]
     db.commit()
