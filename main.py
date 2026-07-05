@@ -420,8 +420,9 @@ async def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db))
         access_token = create_access_token(data={"sub": str(user.id)})
         return {"access_token": access_token, "token_type": "bearer"}
 
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid Google token")
+    except ValueError as e:
+        print(f"Google token verification failed: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Invalid Google token: {str(e)}")
 
 
 class SubscribeRequest(BaseModel):
