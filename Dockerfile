@@ -5,6 +5,10 @@ COPY frontend/package*.json ./
 RUN rm -f package-lock.json
 RUN npm install
 COPY frontend/ .
+ARG VITE_API_URL
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN npm run build
 
 # Stage 2: Build the FastAPI backend
