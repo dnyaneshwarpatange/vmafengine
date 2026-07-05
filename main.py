@@ -388,11 +388,17 @@ class GoogleAuthRequest(BaseModel):
 @app.post("/v1/auth/google")
 async def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db)):
     try:
-        # Request is sent from frontend via Google OAuth provider
-        # Note: In production, pass the client_id to verify the audience.
-        idinfo = id_token.verify_oauth2_token(request.token, google_requests.Request())
+        import requests
+        resp = requests.get(f"https://www.googleapis.com/oauth2/v3/userinfo?access_token={request.token}")
+        if resp.status_code != 200:
+            raise ValueError(f"Invalid access token: {resp.text}")
+        idinfo = resp.json()
+        
         email = idinfo.get("email")
         google_id = idinfo.get("sub")
+        
+        if not email:
+            raise ValueError("No email provided by Google")
         
         user = db.query(User).filter((User.email == email) | (User.google_id == google_id)).first()
         
