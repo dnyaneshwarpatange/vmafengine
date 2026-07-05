@@ -451,7 +451,7 @@ async def create_subscription(request: SubscribeRequest, db: Session = Depends(g
         order = get_razorpay_client().order.create({
             "amount": amount,
             "currency": "INR",
-            "receipt": f"receipt_{user.id}_{secrets.token_hex(4)}"
+            "receipt": f"rcpt_{secrets.token_hex(8)}"
         })
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Razorpay Order Error: {str(e)}")
