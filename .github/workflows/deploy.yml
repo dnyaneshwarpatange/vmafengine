@@ -1,0 +1,48 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # Create project directory if it doesn't exist
+            mkdir -p ~/vmaf-engine
+            cd ~/vmaf-engine
+            
+            # Pull latest changes
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/${{ github.repository }}.git .
+            else
+              git reset --hard
+              git pull origin main
+            fi
+            
+            # Create or update .env file from GitHub Secrets
+            cat <<EOF > .env
+            DATABASE_URL=postgresql://vmaf_user:vmaf_pass@db:5432/vmaf_engine
+            POSTGRES_PASSWORD=vmaf_pass
+            REDIS_URL=redis://redis:6379/0
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            VITE_API_URL=http://${{ secrets.VPS_HOST }}:8000
+            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
+            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+            EOF
+            
+            # Rebuild and restart Docker containers
+            docker-compose down
+            docker-compose up -d --build
