@@ -213,15 +213,8 @@ async def optimize_free(
     os.makedirs("/uploads", exist_ok=True)
     temp_file_path = f"/uploads/free_{secrets.token_hex(8)}_{file.filename}"
     
-    bytes_written = 0
-    max_free_bytes = 20 * 1024 * 1024 # 20MB
     with open(temp_file_path, "wb") as buffer:
         while chunk := file.file.read(1024 * 1024):
-            bytes_written += len(chunk)
-            if bytes_written > max_free_bytes and not user.is_admin:
-                buffer.close()
-                os.remove(temp_file_path)
-                raise HTTPException(status_code=413, detail="File too large for free tier (max ~20MB).")
             buffer.write(chunk)
 
     if current_count is None and not user.is_admin:

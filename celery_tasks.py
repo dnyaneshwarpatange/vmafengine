@@ -18,7 +18,7 @@ from celery import Celery
 
 from models import SessionLocal, User, Job
 from optimizer import optimize_video, get_video_duration
-from config import MAX_DOWNLOAD_BYTES, DOWNLOAD_TIMEOUT_SECONDS
+from config import DOWNLOAD_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,7 @@ def process_video_task(self, job_id: str, input_url: str, user_id: str, target_v
         db.close()
         return
 
+    credits_charged = 0
     work_dir = tempfile.mkdtemp(prefix="vmaf_worker_")
     try:
         input_path = os.path.join(work_dir, "input.mp4")
@@ -91,17 +92,26 @@ def process_video_task(self, job_id: str, input_url: str, user_id: str, target_v
             r = requests.get(input_url, stream=True, timeout=DOWNLOAD_TIMEOUT_SECONDS, headers=headers)
             r.raise_for_status()
 
-            bytes_written = 0
             with open(input_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    bytes_written += len(chunk)
-                    if bytes_written > MAX_DOWNLOAD_BYTES:
-                        raise ValueError(f"File exceeds max download size of {MAX_DOWNLOAD_BYTES} bytes")
+                for chunk in r.iter_content(chunk_size=1024 * 1024):
                     f.write(chunk)
 
         duration = get_video_duration(input_path)
-        if duration > 60 and not user.is_admin:
-            raise ValueError("Video duration exceeds 60s limit for this tier.")
+        
+        # Credit calculation: 1 credit per minute (minimum 1)
+        credits_needed = max(1, int(duration / 60) + (1 if duration % 60 > 0 else 0))
+        
+        # Check if user has sufficient credits (admin gets unlimited)
+        locked_user = db.query(User).filter(User.id == user_id).with_for_update().first()
+        if not locked_user.is_admin and locked_user.credits < credits_needed:
+            raise ValueError(f"Insufficient credits. Need {credits_needed} credits for {duration:.0f}s video (1 credit/min). You have {locked_user.credits}.")
+        
+        # Deduct credits (account for the 1 already reserved at submission)
+        if not locked_user.is_admin:
+            additional = credits_needed - 1  # 1 was already reserved at submission
+            locked_user.credits = max(0, locked_user.credits - additional)
+            credits_charged = credits_needed
+        db.commit()
 
         job.original_size_mb = os.path.getsize(input_path) / (1024 * 1024)
         db.commit()
@@ -131,11 +141,6 @@ def process_video_task(self, job_id: str, input_url: str, user_id: str, target_v
             job.output_url = f"local://{final_path}"
 
         job.status = "completed"
-        
-        additional_credits = max(0, (int(duration / 60) + 1) - 1)
-        if additional_credits:
-            user.credits = max(0, user.credits - additional_credits)
-
         db.commit()
 
     except Exception as exc:
@@ -146,12 +151,15 @@ def process_video_task(self, job_id: str, input_url: str, user_id: str, target_v
             job.error_message = str(exc)[:2000]
             db.commit()
         logger.exception("Job %s failed", job_id)
+        # Refund all credits (1 reserved at submission + any additional charged here)
+        refund = credits_charged if credits_charged > 0 else 1
         user = db.query(User).filter(User.id == user_id).with_for_update().first()
-        if user:
-            user.credits += 1  # refund the reserved credit
+        if user and not user.is_admin:
+            user.credits += refund
             db.commit()
         raise
 
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
         db.close()
+
