@@ -23,6 +23,7 @@ from config import DOWNLOAD_TIMEOUT_SECONDS
 logger = logging.getLogger(__name__)
 
 celery_app = Celery("vmaf_worker", broker=os.getenv("REDIS_URL"), backend=os.getenv("REDIS_URL"))
+celery_app.conf.broker_transport_options = {'visibility_timeout': 86400}  # 24 hours
 
 try:
     import boto3
