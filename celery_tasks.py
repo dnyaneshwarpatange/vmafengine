@@ -41,22 +41,6 @@ except ImportError:
     s3 = None
 
 
-def download_with_cap(url, dest_path, max_bytes=MAX_DOWNLOAD_BYTES):
-    """Stream download with a hard byte cap so an oversized or malicious
-    input_url can't exhaust worker disk."""
-    written = 0
-    with requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-        response.raise_for_status()
-        content_length = response.headers.get("Content-Length")
-        if content_length and int(content_length) > max_bytes:
-            raise ValueError(f"remote file reports {content_length} bytes, exceeds {max_bytes} cap")
-        with open(dest_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                written += len(chunk)
-                if written > max_bytes:
-                    raise ValueError(f"download exceeded {max_bytes} byte cap mid-stream")
-                f.write(chunk)
-
 
 @celery_app.task(bind=True, name="celery_tasks.process_video_task", max_retries=2, default_retry_delay=60, acks_late=True)
 def process_video_task(self, job_id: str, input_url: str, user_id: str, target_vmaf: float, codec: str = "vp9", resolution: str = "original", audio_bitrate: str = "96k"):
